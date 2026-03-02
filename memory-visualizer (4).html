@@ -1,0 +1,1754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MEM_VIZ.SYS — Dynamic Memory Management Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg: #030712;
+    --panel: #0a0f1e;
+    --border: #1e3a5f;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff14;
+    --accent4: #bf5fff;
+    --warn: #ffcc00;
+    --muted: #2a3a5c;
+    --text: #c8d8f0;
+    --dim: #4a6080;
+    --p0: #00d4ff;
+    --p1: #ff6b35;
+    --p2: #39ff14;
+    --p3: #bf5fff;
+    --p4: #ffcc00;
+    --p5: #ff2d9b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* ── GRID OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* ── SCANLINE ── */
+  #scanline {
+    position: fixed; left: 0; right: 0; height: 2px; pointer-events: none; z-index: 999;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,0.18), transparent);
+    animation: scanMove 3s linear infinite;
+  }
+  @keyframes scanMove { from { top: -2px; } to { top: 100vh; } }
+
+  /* ── PARTICLES CANVAS ── */
+  #particles { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+
+  /* ── LAYOUT ── */
+  #app { position: relative; z-index: 10; max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
+
+  /* ── HEADER ── */
+  .header { text-align: center; margin-bottom: 24px; animation: slideIn .6s ease; }
+  .header-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 6px; }
+  .spin-orb {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    animation: rotate 8s linear infinite;
+  }
+  .spin-orb.a { border: 2px solid var(--accent); box-shadow: 0 0 15px var(--accent); }
+  .spin-orb.b { border: 2px solid var(--accent2); box-shadow: 0 0 15px var(--accent2); animation-direction: reverse; }
+  .spin-dot-a { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; }
+  .spin-dot-b { width: 8px; height: 8px; background: var(--accent2); border-radius: 50%; }
+  h1.title {
+    font-family: 'Orbitron', monospace; font-size: 28px; font-weight: 900; letter-spacing: 6px;
+    background: linear-gradient(90deg, var(--accent), var(--accent4), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    text-transform: uppercase;
+  }
+  .subtitle { color: var(--dim); font-size: 11px; letter-spacing: 3px; }
+
+  /* ── STATS BAR ── */
+  .stats-bar { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 20px; }
+  .stat-card { background: var(--panel); border-radius: 6px; padding: 10px 14px; }
+  .stat-label { font-size: 9px; color: var(--dim); letter-spacing: 2px; margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-weight: bold; }
+
+  /* ── TABS ── */
+  .tabs-row { display: flex; gap: 4px; margin-bottom: 0; align-items: flex-end; flex-wrap: wrap; }
+  .tab-btn {
+    padding: 8px 20px;
+    border-radius: 4px 4px 0 0;
+    background: var(--panel); color: var(--dim);
+    font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 2px;
+    cursor: pointer; text-transform: uppercase;
+    border: 1px solid var(--border);
+    transition: all .3s;
+  }
+  .tab-btn:hover { background: rgba(0,212,255,.1); color: var(--accent); }
+  .tab-btn.active { background: rgba(0,212,255,.15); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 15px rgba(0,212,255,.3); }
+
+  .sound-btn, .reset-btn {
+    padding: 6px 14px; border-radius: 6px; font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; letter-spacing: 2px; cursor: pointer; transition: all .2s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sound-btn { background: rgba(0,212,255,.1); border: 1px solid rgba(0,212,255,.5); color: var(--accent); }
+  .sound-btn.muted { background: rgba(255,68,68,.1); border-color: rgba(255,68,68,.5); color: #ff4444; }
+  .sound-btn:hover { filter: brightness(1.25); transform: translateY(-1px); }
+
+  .reset-btn { background: rgba(255,204,0,.1); border: 1px solid rgba(255,204,0,.5); color: var(--warn); }
+  .reset-btn:hover { filter: brightness(1.25); transform: translateY(-1px); }
+
+  .tab-controls { margin-left: auto; display: flex; gap: 8px; align-items: center; padding-bottom: 2px; }
+
+  /* ── MAIN PANEL ── */
+  .main-panel {
+    border: 1px solid var(--border); border-radius: 0 8px 8px 8px;
+    background: var(--panel); padding: 20px;
+  }
+
+  /* ── TAB CONTENT ── */
+  .tab-content { display: none; animation: fadeIn .4s ease; }
+  .tab-content.active { display: block; }
+
+  /* ── PAGING ── */
+  .paging-grid { display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+  .mem-util-bar-wrap { display: flex; gap: 8px; align-items: center; }
+  .mem-util-outer { width: 100px; height: 20px; background: #0a1428; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+  .mem-util-inner { height: 100%; background: linear-gradient(90deg, var(--accent3), var(--warn)); transition: width .5s ease; box-shadow: 0 0 8px var(--accent3); }
+
+  .frames-grid { display: grid; grid-template-columns: repeat(8,1fr); gap: 6px; margin-bottom: 12px; }
+  .frame-block {
+    width: 52px; height: 52px; border: 2px solid var(--muted); border-radius: 4px;
+    background: var(--panel); cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: all .25s ease; position: relative; overflow: hidden;
+  }
+  .frame-block:hover { filter: brightness(1.3); transform: scale(1.05); }
+  .frame-block.flash { animation: frameFlash .5s ease-out; }
+  .frame-num { font-size: 9px; color: var(--dim); }
+  .frame-proc { font-size: 10px; font-weight: bold; }
+  .frame-page { font-size: 8px; opacity: .7; }
+  .frame-free { font-size: 9px; color: var(--dim); }
+
+  @keyframes frameFlash {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+
+  .proc-tables-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .proc-table-card { background: #030712; border-radius: 6px; padding: 10px; }
+  .proc-table-title { font-size: 10px; font-weight: bold; margin-bottom: 6px; }
+  .page-cells-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
+  .page-cell {
+    width: 26px; height: 26px; border-radius: 3px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; transition: all .2s;
+    border: 1px solid var(--border); background: transparent; color: var(--dim);
+  }
+  .page-cell:hover { transform: scale(1.15); filter: brightness(1.4); }
+  .page-cell.allocated { }
+  .proc-pages-loaded { font-size: 9px; color: var(--dim); }
+
+  /* ── OP BUTTONS ── */
+  .op-panel { background: #030712; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .op-panel-title { font-size: 11px; letter-spacing: 2px; margin-bottom: 10px; }
+  .op-btns { display: flex; flex-direction: column; gap: 8px; }
+  .op-btn {
+    padding: 10px 0; border-radius: 6px; font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; letter-spacing: 2px; cursor: pointer; width: 100%; transition: all .2s;
+    border: 1px solid; background: transparent;
+  }
+  .op-btn:hover { transform: translateY(-2px); filter: brightness(1.25); }
+  .op-btn:active { transform: scale(.96); }
+  .op-btn.alloc { color: var(--accent3); border-color: rgba(57,255,20,.5); background: rgba(57,255,20,.1); box-shadow: 0 0 10px rgba(57,255,20,.1); }
+  .op-btn.dealloc { color: var(--accent2); border-color: rgba(255,107,53,.5); background: rgba(255,107,53,.1); box-shadow: 0 0 10px rgba(255,107,53,.1); }
+  .op-btn.flush { color: #ff4444; border-color: rgba(255,68,68,.5); background: rgba(255,68,68,.1); box-shadow: 0 0 10px rgba(255,68,68,.1); }
+  .op-btn.stress { color: var(--accent); border-color: rgba(0,212,255,.5); background: rgba(0,212,255,.1); box-shadow: 0 0 10px rgba(0,212,255,.1); }
+
+  /* ── LEGEND ── */
+  .legend-panel { background: #030712; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-top: 0; }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 10px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .legend-frames { margin-left: auto; font-size: 9px; color: var(--dim); }
+
+  /* ── ADDRESS TRANSLATION ── */
+  .addr-section { margin-top: 16px; }
+  .addr-slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .addr-slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+  .addr-val { font-size: 12px; color: var(--accent); font-family: monospace; width: 60px; }
+  .addr-translation-box { background: #0a0f1e; border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .addr-title { font-size: 12px; color: var(--accent); letter-spacing: 2px; text-shadow: 0 0 8px var(--accent); margin-bottom: 12px; display: block; }
+  .addr-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .addr-box { border-radius: 4px; padding: 6px 12px; text-align: center; }
+  .addr-box-label { font-size: 9px; color: var(--dim); margin-bottom: 2px; }
+  .addr-box-val { font-size: 16px; font-weight: bold; }
+  .addr-box-val.big { font-size: 18px; }
+  .addr-arrow { color: var(--dim); font-size: 20px; }
+
+  /* ── EVENT LOG ── */
+  .log-section { margin-top: 16px; }
+  .log-title { font-size: 11px; color: var(--accent); letter-spacing: 2px; text-shadow: 0 0 8px var(--accent); display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .log-cursor { display: inline-block; width: 6px; height: 12px; background: var(--accent); animation: blink 1s infinite; }
+  .log-box { height: 120px; overflow-y: auto; background: #030712; border: 1px solid var(--border); border-radius: 4px; padding: 8px; font-size: 11px; }
+  .log-entry { margin-bottom: 2px; }
+  .log-time { color: var(--dim); }
+  .log-entry.alloc { color: var(--accent3); }
+  .log-entry.free { color: var(--accent2); }
+  .log-entry.fault { color: #ff4444; }
+  .log-entry.info { color: var(--accent); }
+
+  /* ── SEGMENTATION ── */
+  .seg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .seg-bars { display: flex; flex-direction: column; gap: 6px; }
+  .seg-bar-row { display: flex; align-items: center; gap: 8px; }
+  .seg-bar-label { font-size: 10px; color: var(--dim); width: 55px; font-family: monospace; }
+  .seg-bar-outer { flex: 1; height: 20px; background: #0a1428; border-radius: 3px; overflow: hidden; }
+  .seg-bar-inner { height: 100%; display: flex; align-items: center; padding-left: 6px; transition: width .6s cubic-bezier(.34,1.56,.64,1); }
+  .seg-bar-inner span { font-size: 9px; color: #000; font-weight: bold; font-family: monospace; }
+  .seg-bar-addr { font-size: 9px; width: 60px; text-align: right; font-family: monospace; }
+
+  .seg-controls { margin-top: 20px; }
+  .seg-ctrl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .seg-ctrl-label { font-size: 10px; width: 50px; font-family: monospace; }
+  .seg-ctrl-row input[type=range] { flex: 1; }
+  .seg-ctrl-val { font-size: 10px; width: 30px; font-family: monospace; }
+
+  .seg-map-box { position: relative; height: 380px; background: #030712; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg-map-rule { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--border); display: flex; align-items: flex-start; justify-content: flex-end; padding-right: 6px; padding-top: 2px; }
+  .seg-map-rule span { font-size: 9px; color: var(--dim); font-family: monospace; }
+  .seg-block {
+    position: absolute; left: 10%; right: 20%;
+    border-radius: 4px; display: flex; align-items: center; padding-left: 10px;
+    transition: all .6s cubic-bezier(.34,1.56,.64,1); overflow: hidden;
+  }
+  .seg-block-name { font-size: 10px; font-weight: bold; }
+  .seg-block-size { font-size: 9px; margin-left: 8px; }
+  .seg-block-scan { position: absolute; left: 0; right: 0; height: 1px; top: 50%; }
+
+  .seg-stats-grid { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .seg-stat { background: #030712; border-radius: 6px; padding: 8px 12px; }
+  .seg-stat-label { font-size: 9px; color: var(--dim); margin-bottom: 2px; }
+  .seg-stat-val { font-size: 18px; font-weight: bold; }
+
+  /* ── VIRTUAL MEMORY ── */
+  .virt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .hierarchy-item {
+    margin-bottom: 12px; border-radius: 8px; padding: 14px; position: relative; overflow: hidden;
+    cursor: pointer; transition: all .2s;
+  }
+  .hierarchy-item:hover { filter: brightness(1.15); transform: scale(1.01); }
+  .hierarchy-fill { position: absolute; left: 0; top: 0; bottom: 0; transition: width 1s ease; }
+  .hierarchy-inner { position: relative; display: flex; align-items: center; gap: 12px; }
+  .hierarchy-icon { width: 40px; height: 40px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; flex-shrink: 0; }
+  .hierarchy-name { font-size: 12px; font-weight: bold; margin-bottom: 2px; }
+  .hierarchy-sub { font-size: 9px; color: var(--dim); }
+  .hierarchy-right { text-align: right; margin-left: auto; }
+  .hierarchy-latency { font-size: 11px; }
+  .hierarchy-size { font-size: 9px; color: var(--dim); }
+  .hierarchy-used { font-size: 10px; opacity: .7; }
+  .hierarchy-bar { margin-top: 8px; height: 4px; background: #0a1428; border-radius: 2px; overflow: hidden; position: relative; }
+  .hierarchy-bar-inner { height: 100%; border-radius: 2px; transition: width 1s ease; }
+
+  .resolution-flow { background: #030712; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .resolution-step { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; transition: opacity .3s; }
+  .resolution-step.pending { opacity: .4; }
+  .step-dot { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; }
+  .step-dot.active { animation: pulseGlow 1s infinite; }
+  .step-line { flex: 1; height: 1px; }
+  .step-label { font-size: 10px; text-align: right; }
+
+  .policies-panel { background: #030712; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .policy-item { margin-bottom: 10px; cursor: pointer; padding: 4px 0; transition: all .15s; }
+  .policy-item:hover { filter: brightness(1.3); }
+  .policy-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .policy-name { font-size: 10px; font-weight: bold; }
+  .policy-desc { font-size: 9px; color: var(--dim); }
+  .policy-pct { font-size: 10px; }
+  .policy-bar-outer { height: 6px; background: #0a1428; border-radius: 3px; overflow: hidden; }
+  .policy-bar-inner { height: 100%; border-radius: 3px; }
+
+  .addr-space-panel { margin-top: 12px; background: #030712; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .addr-space-row { display: flex; gap: 4px; height: 50px; }
+  .addr-space-block { display: flex; align-items: center; justify-content: center; flex-direction: column; border-radius: 4px; cursor: pointer; transition: all .2s; }
+  .addr-space-block:hover { filter: brightness(1.4); transform: scaleY(1.05); }
+  .addr-space-name { font-size: 8px; font-weight: bold; }
+  .addr-space-pct { font-size: 7px; opacity: .6; }
+
+  /* ── FOOTER ── */
+  .footer { text-align: center; margin-top: 16px; color: var(--dim); font-size: 10px; letter-spacing: 2px; }
+  .footer-clock { color: var(--accent); animation: blink 1s infinite; }
+
+  /* ── GLOW TEXT ── */
+  .glow-accent { color: var(--accent); text-shadow: 0 0 8px var(--accent), 0 0 20px rgba(0,212,255,.3); }
+  .glow-accent2 { color: var(--accent2); text-shadow: 0 0 8px var(--accent2); }
+  .glow-accent3 { color: var(--accent3); text-shadow: 0 0 8px var(--accent3); }
+  .glow-accent4 { color: var(--accent4); text-shadow: 0 0 8px var(--accent4); }
+  .glow-warn { color: var(--warn); text-shadow: 0 0 8px var(--warn); }
+
+  /* ── SECTION TITLE ── */
+  .sec-title { font-size: 12px; letter-spacing: 2px; display: block; margin-bottom: 12px; }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeIn { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: translateY(0); } }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+  @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes slideIn { from { opacity:0; transform: translateX(-20px); } to { opacity:1; transform: translateX(0); } }
+  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 5px currentColor; } 50% { box-shadow: 0 0 15px currentColor; } }
+  @keyframes matrixRain {
+    0% { transform: translateY(-100%); opacity:0; }
+    10% { opacity:1; } 90% { opacity:1; }
+    100% { transform: translateY(200px); opacity:0; }
+  }
+  @keyframes flashIn { 0% { opacity:1; transform: scale(1.15); } 100% { opacity:0; transform: scale(1); } }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #030712; }
+  ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
+
+  /* ── SIZE SLIDER WIDGET ── */
+  #size-widget {
+    position: fixed;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: rgba(10,15,30,0.92);
+    border: 1px solid rgba(0,212,255,0.35);
+    border-radius: 50px;
+    padding: 16px 10px;
+    box-shadow: 0 0 24px rgba(0,212,255,0.15), inset 0 0 20px rgba(0,212,255,0.04);
+    backdrop-filter: blur(8px);
+    user-select: none;
+  }
+  #size-widget-label {
+    font-family: 'Orbitron', monospace;
+    font-size: 8px;
+    color: var(--accent);
+    text-shadow: 0 0 6px var(--accent);
+    letter-spacing: 2px;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+  }
+  #size-pct {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    color: var(--accent);
+    text-shadow: 0 0 6px var(--accent);
+    letter-spacing: 1px;
+    text-align: center;
+  }
+  #size-icon-top, #size-icon-bot {
+    font-size: 14px;
+    line-height: 1;
+    filter: drop-shadow(0 0 4px var(--accent));
+  }
+  /* vertical range: rotate a horizontal range */
+  #size-slider-track {
+    position: relative;
+    width: 6px;
+    height: 140px;
+    background: linear-gradient(to top, rgba(0,212,255,0.12), rgba(0,212,255,0.04));
+    border-radius: 3px;
+    border: 1px solid rgba(0,212,255,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #size-slider {
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 6px;
+    height: 130px;
+    cursor: pointer;
+    background: transparent;
+    outline: none;
+    border: none;
+    padding: 0;
+  }
+  /* Chrome/Safari vertical thumb */
+  #size-slider::-webkit-slider-runnable-track {
+    background: linear-gradient(to top, var(--accent), rgba(0,212,255,0.3));
+    width: 4px;
+    border-radius: 2px;
+  }
+  #size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent), 0 0 20px rgba(0,212,255,0.5);
+    cursor: grab;
+    border: 2px solid #fff;
+    margin-left: -8px;
+    transition: box-shadow 0.2s;
+  }
+  #size-slider::-webkit-slider-thumb:active {
+    cursor: grabbing;
+    box-shadow: 0 0 18px var(--accent), 0 0 35px rgba(0,212,255,0.8);
+  }
+  #size-slider::-moz-range-thumb {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    cursor: grab;
+    border: 2px solid #fff;
+  }
+  /* fill indicator inside track */
+  #size-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, rgba(0,212,255,0.4), rgba(0,212,255,0.08));
+    border-radius: 3px;
+    transition: height 0.1s ease;
+    pointer-events: none;
+  }
+  /* notch marks */
+  #size-notches {
+    position: absolute;
+    right: -8px;
+    top: 0; bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .size-notch {
+    width: 6px;
+    height: 1px;
+    background: rgba(0,212,255,0.3);
+  }
+  /* scale wrapper - transforms from top center */
+  #app {
+    transform-origin: top center;
+    transition: transform 0.15s ease;
+  }
+
+  /* ── MEMORY CONFIGURATOR ── */
+  .mem-config-panel {
+    background: #030712;
+    border: 1px solid rgba(0,212,255,0.3);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .mem-config-panel::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(0,212,255,0.04), transparent);
+    pointer-events: none;
+  }
+  .mem-config-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+  }
+  .mem-config-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px; letter-spacing: 2px;
+    color: var(--accent); text-shadow: 0 0 8px var(--accent);
+  }
+  .mem-config-badges {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .mem-badge {
+    border-radius: 4px; padding: 3px 10px;
+    font-size: 12px; font-weight: bold;
+    font-family: 'Orbitron', monospace; letter-spacing: 1px;
+  }
+  .mem-badge.frames {
+    background: rgba(191,95,255,0.15);
+    border: 1px solid rgba(191,95,255,0.5);
+    color: var(--accent4);
+    text-shadow: 0 0 6px var(--accent4);
+  }
+  .mem-badge.kb {
+    background: rgba(0,212,255,0.15);
+    border: 1px solid rgba(0,212,255,0.5);
+    color: var(--accent);
+    text-shadow: 0 0 6px var(--accent);
+  }
+  /* slider row */
+  .mem-slider-row {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  }
+  .mem-slider-icon { font-size: 16px; flex-shrink: 0; }
+  #mem-config-slider {
+    flex: 1; height: 6px;
+    -webkit-appearance: none; appearance: none;
+    background: linear-gradient(90deg, var(--accent) var(--fill,50%), rgba(0,212,255,0.15) var(--fill,50%));
+    border-radius: 3px; outline: none; cursor: pointer;
+    transition: background 0.1s;
+  }
+  #mem-config-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: radial-gradient(circle, #fff 20%, var(--accent) 60%);
+    box-shadow: 0 0 10px var(--accent), 0 0 20px rgba(0,212,255,0.4);
+    cursor: grab; border: 2px solid rgba(255,255,255,0.6);
+    transition: box-shadow 0.2s;
+  }
+  #mem-config-slider::-webkit-slider-thumb:active {
+    cursor: grabbing; box-shadow: 0 0 18px var(--accent), 0 0 36px rgba(0,212,255,0.7);
+  }
+  #mem-config-slider::-moz-range-thumb {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 10px var(--accent);
+    cursor: grab; border: 2px solid #fff;
+  }
+  /* tick marks under the slider */
+  .mem-slider-ticks {
+    display: flex; justify-content: space-between;
+    padding: 0 11px; margin-bottom: 10px;
+  }
+  .mem-tick { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .mem-tick-line { width: 1px; height: 5px; background: rgba(0,212,255,0.3); }
+  .mem-tick-label { font-size: 8px; color: var(--dim); font-family: monospace; white-space: nowrap; }
+  /* preset buttons */
+  .mem-presets {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .mem-preset-btn {
+    flex: 1; min-width: 52px; padding: 6px 4px;
+    border-radius: 5px; font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; letter-spacing: 1px; cursor: pointer;
+    border: 1px solid rgba(0,212,255,0.3);
+    background: rgba(0,212,255,0.05); color: var(--dim);
+    transition: all 0.2s; text-align: center;
+  }
+  .mem-preset-btn:hover {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(0,212,255,0.12);
+    transform: translateY(-1px);
+    box-shadow: 0 0 8px rgba(0,212,255,0.2);
+  }
+  .mem-preset-btn.active {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(0,212,255,0.18);
+    box-shadow: 0 0 12px rgba(0,212,255,0.3);
+    font-weight: bold;
+  }
+  .mem-preset-sub { font-size: 8px; color: var(--dim); margin-top: 1px; }
+  .mem-preset-btn.active .mem-preset-sub { color: rgba(0,212,255,0.7); }
+  /* warning flash when memory is trimmed */
+  @keyframes warnFlash {
+    0%,100% { border-color: rgba(0,212,255,0.3); }
+    50% { border-color: rgba(255,107,53,0.8); box-shadow: 0 0 20px rgba(255,107,53,0.3); }
+  }
+  .mem-config-panel.warn { animation: warnFlash 0.6s ease; }
+
+  /* ── AI HELP CHATBOT ── */
+  #help-toggle {
+    position: fixed;
+    left: 16px;
+    bottom: 80px;
+    z-index: 9999;
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(191,95,255,0.3), rgba(0,212,255,0.2));
+    border: 2px solid var(--accent4);
+    box-shadow: 0 0 20px rgba(191,95,255,0.5), 0 0 40px rgba(191,95,255,0.2);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    transition: all 0.3s;
+    animation: helpPulse 2.5s ease-in-out infinite;
+  }
+  #help-toggle:hover {
+    transform: scale(1.12);
+    box-shadow: 0 0 30px rgba(191,95,255,0.8), 0 0 60px rgba(191,95,255,0.3);
+  }
+  @keyframes helpPulse {
+    0%,100% { box-shadow: 0 0 20px rgba(191,95,255,0.5), 0 0 40px rgba(191,95,255,0.2); }
+    50%      { box-shadow: 0 0 30px rgba(191,95,255,0.9), 0 0 60px rgba(191,95,255,0.4); }
+  }
+  #help-badge {
+    position: absolute; top: -4px; right: -4px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent3); border: 2px solid var(--bg);
+    font-size: 8px; color: #000; font-weight: bold;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Orbitron', monospace;
+    animation: blink 2s infinite;
+  }
+
+  #help-panel {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: 380px;
+    z-index: 10000;
+    background: rgba(6, 10, 24, 0.97);
+    border-right: 1px solid rgba(191,95,255,0.4);
+    box-shadow: 4px 0 40px rgba(191,95,255,0.15), inset -1px 0 0 rgba(191,95,255,0.1);
+    display: flex; flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    backdrop-filter: blur(12px);
+  }
+  #help-panel.open { transform: translateX(0); }
+
+  .help-header {
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid rgba(191,95,255,0.2);
+    background: linear-gradient(135deg, rgba(191,95,255,0.1), rgba(0,212,255,0.05));
+    flex-shrink: 0;
+  }
+  .help-header-row {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;
+  }
+  .help-title-group { display: flex; align-items: center; gap: 10px; }
+  .help-ai-orb {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent4), var(--accent));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 0 15px rgba(191,95,255,0.6);
+    animation: rotate 8s linear infinite;
+    flex-shrink: 0;
+  }
+  .help-title {
+    font-family: 'Orbitron', monospace; font-size: 13px; font-weight: 700;
+    color: var(--accent4); text-shadow: 0 0 10px var(--accent4);
+    letter-spacing: 2px;
+  }
+  .help-subtitle { font-size: 9px; color: var(--dim); letter-spacing: 2px; margin-top: 2px; }
+  .help-close {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(255,68,68,0.15); border: 1px solid rgba(255,68,68,0.4);
+    color: #ff4444; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s; flex-shrink: 0;
+  }
+  .help-close:hover { background: rgba(255,68,68,0.3); transform: scale(1.1); }
+
+  /* Quick suggestions */
+  .help-suggestions {
+    padding: 10px 14px 0;
+    display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0;
+  }
+  .help-chip {
+    padding: 4px 10px; border-radius: 20px; font-size: 9px; letter-spacing: 1px;
+    cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    border: 1px solid rgba(0,212,255,0.3);
+    background: rgba(0,212,255,0.07); color: var(--accent);
+  }
+  .help-chip:hover {
+    background: rgba(0,212,255,0.18); border-color: var(--accent);
+    transform: translateY(-1px); box-shadow: 0 0 8px rgba(0,212,255,0.3);
+  }
+
+  /* Chat messages area */
+  .help-messages {
+    flex: 1; overflow-y: auto; padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .help-messages::-webkit-scrollbar { width: 3px; }
+  .help-messages::-webkit-scrollbar-track { background: transparent; }
+  .help-messages::-webkit-scrollbar-thumb { background: rgba(191,95,255,0.3); border-radius: 2px; }
+
+  .chat-msg {
+    display: flex; gap: 8px; animation: fadeIn 0.3s ease;
+  }
+  .chat-msg.user { flex-direction: row-reverse; }
+  .chat-avatar {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+    margin-top: 2px;
+  }
+  .chat-avatar.ai {
+    background: linear-gradient(135deg, var(--accent4), var(--accent));
+    box-shadow: 0 0 8px rgba(191,95,255,0.4);
+  }
+  .chat-avatar.user-av {
+    background: linear-gradient(135deg, var(--accent3), rgba(57,255,20,0.5));
+    box-shadow: 0 0 8px rgba(57,255,20,0.4);
+  }
+  .chat-bubble {
+    max-width: 78%; padding: 10px 13px; border-radius: 12px;
+    font-size: 11.5px; line-height: 1.6; font-family: 'Share Tech Mono', monospace;
+  }
+  .chat-bubble.ai {
+    background: rgba(191,95,255,0.1);
+    border: 1px solid rgba(191,95,255,0.25);
+    color: var(--text);
+    border-radius: 4px 12px 12px 12px;
+  }
+  .chat-bubble.user {
+    background: rgba(0,212,255,0.12);
+    border: 1px solid rgba(0,212,255,0.3);
+    color: var(--accent);
+    border-radius: 12px 4px 12px 12px;
+    text-align: right;
+  }
+  .chat-bubble code {
+    background: rgba(0,212,255,0.15); border-radius: 3px;
+    padding: 1px 5px; font-size: 10px; color: var(--accent3);
+  }
+  .chat-bubble .cmd-btn {
+    display: inline-block; margin: 3px 3px 0 0;
+    padding: 3px 8px; border-radius: 4px; font-size: 9px;
+    background: rgba(57,255,20,0.15); border: 1px solid rgba(57,255,20,0.4);
+    color: var(--accent3); cursor: pointer; transition: all 0.2s;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .chat-bubble .cmd-btn:hover {
+    background: rgba(57,255,20,0.3); transform: translateY(-1px);
+  }
+
+  .typing-indicator {
+    display: flex; gap: 4px; padding: 10px 14px; align-items: center;
+  }
+  .typing-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent4);
+    animation: typingBounce 1.2s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typingBounce {
+    0%,60%,100% { transform: translateY(0); opacity: 0.4; }
+    30%          { transform: translateY(-8px); opacity: 1; }
+  }
+
+  /* Input area */
+  .help-input-area {
+    padding: 12px 14px; border-top: 1px solid rgba(191,95,255,0.2);
+    background: rgba(10,15,30,0.8); flex-shrink: 0;
+  }
+  .help-input-row {
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  #help-input {
+    flex: 1; background: rgba(191,95,255,0.08);
+    border: 1px solid rgba(191,95,255,0.3); border-radius: 8px;
+    color: var(--text); font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; padding: 9px 12px; resize: none;
+    outline: none; transition: border-color 0.2s;
+    min-height: 40px; max-height: 100px;
+  }
+  #help-input:focus { border-color: var(--accent4); box-shadow: 0 0 10px rgba(191,95,255,0.2); }
+  #help-input::placeholder { color: var(--dim); }
+  #help-send {
+    width: 38px; height: 38px; border-radius: 8px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent4), var(--accent));
+    border: none; cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    box-shadow: 0 0 10px rgba(191,95,255,0.4);
+  }
+  #help-send:hover { transform: scale(1.08); box-shadow: 0 0 18px rgba(191,95,255,0.7); }
+  #help-send:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .help-status {
+    font-size: 9px; color: var(--dim); margin-top: 6px; letter-spacing: 1px; text-align: center;
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 780px) {
+    .paging-grid, .seg-grid, .virt-grid { grid-template-columns: 1fr; }
+    .frames-grid { grid-template-columns: repeat(4,1fr); }
+    .stats-bar { grid-template-columns: repeat(2,1fr); }
+    h1.title { font-size: 18px; letter-spacing: 3px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="scanline"></div>
+<canvas id="particles"></canvas>
+
+<div id="app">
+
+  <!-- ── HEADER ── -->
+  <div class="header">
+    <div class="header-row">
+      <div class="spin-orb a"><div class="spin-dot-a"></div></div>
+      <h1 class="title">MEM_VIZ.SYS</h1>
+      <div class="spin-orb b"><div class="spin-dot-b"></div></div>
+    </div>
+    <p class="subtitle">DYNAMIC MEMORY MANAGEMENT VISUALIZER v2.4.1</p>
+  </div>
+
+  <!-- ── STATS BAR ── -->
+  <div class="stats-bar">
+    <div class="stat-card" style="border:1px solid rgba(57,255,20,.3);box-shadow:inset 0 0 20px rgba(57,255,20,.05)">
+      <div class="stat-label">ALLOCATIONS</div>
+      <div class="stat-value glow-accent3" id="stat-allocs">0</div>
+    </div>
+    <div class="stat-card" style="border:1px solid rgba(255,107,53,.3);box-shadow:inset 0 0 20px rgba(255,107,53,.05)">
+      <div class="stat-label">DEALLOCATIONS</div>
+      <div class="stat-value glow-accent2" id="stat-frees">0</div>
+    </div>
+    <div class="stat-card" style="border:1px solid rgba(255,68,68,.3);box-shadow:inset 0 0 20px rgba(255,68,68,.05)">
+      <div class="stat-label">PAGE FAULTS</div>
+      <div class="stat-value" style="color:#ff4444;text-shadow:0 0 12px #ff4444" id="stat-faults">0</div>
+    </div>
+    <div class="stat-card" style="border:1px solid rgba(255,204,0,.3);box-shadow:inset 0 0 20px rgba(255,204,0,.05)">
+      <div class="stat-label">MEM USAGE</div>
+      <div class="stat-value glow-warn" id="stat-util">0%</div>
+    </div>
+  </div>
+
+  <!-- ── TABS + CONTROLS ── -->
+  <div class="tabs-row">
+    <button class="tab-btn active" data-tab="paging">PAGING</button>
+    <button class="tab-btn" data-tab="segmentation">SEGMENTATION</button>
+    <button class="tab-btn" data-tab="virtual">VIRTUAL</button>
+    <div class="tab-controls">
+      <button class="reset-btn" id="btn-reset" onclick="resetAll()">⟳ RESET</button>
+      <button class="sound-btn" id="btn-sound" onclick="toggleMute()">🔊 SOUND ON</button>
+    </div>
+  </div>
+
+  <!-- ── MAIN PANEL ── -->
+  <div class="main-panel">
+
+    <!-- ──────────────────── PAGING TAB ──────────────────── -->
+    <div class="tab-content active" id="tab-paging">
+      <div class="paging-grid">
+
+        <!-- LEFT: Memory grid + proc tables -->
+        <div>
+          <!-- util bar -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <span class="glow-accent" style="font-size:12px;letter-spacing:2px" id="mem-label">PHYSICAL MEMORY — 64KB</span>
+            <div class="mem-util-bar-wrap">
+              <div class="mem-util-outer"><div class="mem-util-inner" id="util-bar" style="width:0%"></div></div>
+              <span style="font-size:11px;color:var(--dim)" id="util-text">0/16</span>
+            </div>
+          </div>
+
+          <!-- ── MEMORY CONFIGURATOR PANEL ── -->
+          <div class="mem-config-panel" id="mem-config-panel">
+            <div class="mem-config-header">
+              <span class="mem-config-title">⚙ PHYSICAL MEMORY CONFIG</span>
+              <div class="mem-config-badges">
+                <span class="mem-badge frames"><span id="mem-frames-display">16</span> FRAMES</span>
+                <span class="mem-badge kb" id="mem-kb-display">64KB</span>
+              </div>
+            </div>
+            <!-- slider -->
+            <div class="mem-slider-row">
+              <span class="mem-slider-icon" style="color:var(--dim)">◁</span>
+              <input type="range" id="mem-config-slider" min="4" max="64" step="4" value="16"
+                oninput="handleMemSlider(this.value)">
+              <span class="mem-slider-icon" style="color:var(--accent)">▷</span>
+            </div>
+            <!-- tick marks -->
+            <div class="mem-slider-ticks">
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">16KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">32KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">64KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">96KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">128KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">160KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">192KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">224KB</span></div>
+              <div class="mem-tick"><div class="mem-tick-line"></div><span class="mem-tick-label">256KB</span></div>
+            </div>
+            <!-- quick presets -->
+            <div class="mem-presets">
+              <button class="mem-preset-btn" data-frames="4" onclick="resizeMemory(4)">
+                16KB<div class="mem-preset-sub">4 frames</div>
+              </button>
+              <button class="mem-preset-btn" data-frames="8" onclick="resizeMemory(8)">
+                32KB<div class="mem-preset-sub">8 frames</div>
+              </button>
+              <button class="mem-preset-btn active" data-frames="16" onclick="resizeMemory(16)">
+                64KB<div class="mem-preset-sub">16 frames</div>
+              </button>
+              <button class="mem-preset-btn" data-frames="24" onclick="resizeMemory(24)">
+                96KB<div class="mem-preset-sub">24 frames</div>
+              </button>
+              <button class="mem-preset-btn" data-frames="32" onclick="resizeMemory(32)">
+                128KB<div class="mem-preset-sub">32 frames</div>
+              </button>
+              <button class="mem-preset-btn" data-frames="48" onclick="resizeMemory(48)">
+                192KB<div class="mem-preset-sub">48 frames</div>
+              </button>
+              <button class="mem-preset-btn" data-frames="64" onclick="resizeMemory(64)">
+                256KB<div class="mem-preset-sub">64 frames</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4×4 frame grid -->
+          <div class="frames-grid" id="frames-grid"></div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:12px">↑ Click allocated block to FREE it · Click free block to SELECT it</div>
+
+          <!-- Process page tables: 3 processes -->
+          <div class="proc-tables-grid" id="proc-tables"></div>
+        </div>
+
+        <!-- RIGHT: Controls + Legend -->
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="op-panel">
+            <div class="op-panel-title glow-accent4">MEMORY OPERATIONS</div>
+            <div class="op-btns">
+              <button class="op-btn alloc"  onclick="playAndDo('allocate',  randomAllocate)">⊕ ALLOCATE PAGE</button>
+              <button class="op-btn dealloc" onclick="playAndDo('deallocate', randomDeallocate)">⊖ DEALLOCATE PAGE</button>
+              <button class="op-btn flush"  onclick="playAndDo('flush',     flushAll)">⊗ FLUSH ALL MEMORY</button>
+              <button class="op-btn stress" onclick="playAndDo('stressTest', stressTest)">⚡ STRESS TEST</button>
+            </div>
+          </div>
+
+          <div class="legend-panel">
+            <div style="font-size:11px;letter-spacing:2px;margin-bottom:8px" class="glow-accent">PROCESS LEGEND</div>
+            <div id="legend-items"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Address translation -->
+      <div class="addr-section">
+        <div class="addr-slider-row">
+          <span class="glow-accent" style="font-size:11px;letter-spacing:2px;white-space:nowrap">VIRTUAL ADDRESS</span>
+          <input type="range" id="vaddr-slider" min="0" max="31" value="8" oninput="handleAddrChange(this.value)">
+          <span class="addr-val" id="vaddr-display">0x0008</span>
+        </div>
+        <div class="addr-translation-box">
+          <span class="addr-title">ADDRESS TRANSLATION</span>
+          <div class="addr-flow" id="addr-flow"></div>
+        </div>
+      </div>
+
+      <!-- Event log -->
+      <div class="log-section">
+        <div class="log-title">
+          <span class="glow-accent" style="font-size:11px;letter-spacing:2px">SYSTEM LOG</span>
+          <span class="log-cursor"></span>
+        </div>
+        <div class="log-box" id="log-box"></div>
+      </div>
+    </div>
+
+    <!-- ──────────────────── SEGMENTATION TAB ──────────────────── -->
+    <div class="tab-content" id="tab-segmentation">
+      <div class="seg-grid">
+        <div>
+          <span class="sec-title glow-accent">SEGMENT TABLE — 64KB ADDRESS SPACE</span>
+          <div class="seg-bars" id="seg-bars"></div>
+          <div class="seg-controls">
+            <span class="sec-title glow-accent4" style="font-size:11px;margin-top:10px">MODIFY SEGMENTS</span>
+            <div id="seg-sliders"></div>
+          </div>
+        </div>
+        <div>
+          <span class="sec-title glow-accent">MEMORY MAP VISUALIZATION</span>
+          <div class="seg-map-box" id="seg-map">
+            <div class="seg-map-rule" style="top:0%"><span>0</span></div>
+            <div class="seg-map-rule" style="top:25%"><span>16K</span></div>
+            <div class="seg-map-rule" style="top:50%"><span>32K</span></div>
+            <div class="seg-map-rule" style="top:75%"><span>48K</span></div>
+            <div class="seg-map-rule" style="top:100%"><span>64K</span></div>
+          </div>
+          <div class="seg-stats-grid" id="seg-stats"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ──────────────────── VIRTUAL MEMORY TAB ──────────────────── -->
+    <div class="tab-content" id="tab-virtual">
+      <div class="virt-grid">
+        <div>
+          <span class="sec-title glow-accent">VIRTUAL MEMORY HIERARCHY</span>
+          <div id="hierarchy-list"></div>
+        </div>
+        <div>
+          <span class="sec-title glow-accent">PAGE FAULT SIMULATION</span>
+          <div class="resolution-flow">
+            <span class="glow-warn" style="font-size:11px;letter-spacing:2px;display:block;margin-bottom:10px">ADDRESS RESOLUTION FLOW</span>
+            <div id="resolution-steps"></div>
+          </div>
+          <div class="policies-panel" style="margin-bottom:12px">
+            <span class="glow-accent4" style="font-size:11px;letter-spacing:2px;display:block;margin-bottom:10px">PAGE REPLACEMENT POLICIES</span>
+            <div id="policy-list"></div>
+          </div>
+          <div class="addr-space-panel">
+            <span class="glow-accent2" style="font-size:11px;letter-spacing:2px;display:block;margin-bottom:10px">VIRTUAL ADDRESS SPACE (32-bit)</span>
+            <div class="addr-space-row" id="addr-space-row"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-panel -->
+
+  <!-- FOOTER -->
+  <div class="footer">
+    MEM_VIZ.SYS · ANTHROPIC LABS · PROCESSES: 3 · CLOCK: <span class="footer-clock">▋</span>
+  <br><br>
+  <span style="color:var(--accent);text-shadow:0 0 8px var(--accent),0 0 20px rgba(0,212,255,.3);letter-spacing:3px;font-size:11px">MADE BY ARUNAVA GHOSH</span>
+  <span style="color:var(--dim);letter-spacing:2px;font-size:11px"> | </span>
+  <span style="color:var(--accent3);text-shadow:0 0 8px var(--accent3);letter-spacing:3px;font-size:11px">INDIA 🇮🇳</span>
+    <span id="audio-hint" style="margin-left:16px;color:var(--warn)">[ CLICK ANYWHERE TO ENABLE SOUND ]</span>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ── AI HELP BUTTON ── -->
+<button id="help-toggle" onclick="toggleHelp()" title="AI Memory Assistant">
+  🤖<span id="help-badge">AI</span>
+</button>
+
+<!-- ── AI HELP PANEL ── -->
+<div id="help-panel">
+  <div class="help-header">
+    <div class="help-header-row">
+      <div class="help-title-group">
+        <div class="help-ai-orb">🧠</div>
+        <div>
+          <div class="help-title">MEM·AI ASSISTANT</div>
+          <div class="help-subtitle">POWERED BY CLAUDE · ALWAYS ONLINE</div>
+        </div>
+      </div>
+      <button class="help-close" onclick="toggleHelp()">✕</button>
+    </div>
+  </div>
+  <div class="help-suggestions">
+    <span class="help-chip" onclick="askChip('How does paging work?')">📖 Paging?</span>
+    <span class="help-chip" onclick="askChip('Allocate 4 pages for PROC_A')">⊕ Allocate</span>
+    <span class="help-chip" onclick="askChip('What is a page fault?')">⚠ Page Fault</span>
+    <span class="help-chip" onclick="askChip('Explain segmentation vs paging')">📊 Seg vs Paging</span>
+    <span class="help-chip" onclick="askChip('Show current memory status')">📡 Status</span>
+    <span class="help-chip" onclick="askChip('Run a stress test and explain results')">⚡ Stress</span>
+    <span class="help-chip" onclick="askChip('What is TLB and how does it help?')">🔍 TLB</span>
+    <span class="help-chip" onclick="askChip('Flush all memory')">🗑 Flush</span>
+  </div>
+  <div class="help-messages" id="help-messages"></div>
+  <div class="help-input-area">
+    <div class="help-input-row">
+      <textarea id="help-input" placeholder="Ask me anything about memory management..." rows="1"
+        onkeydown="handleHelpKey(event)" oninput="autoResizeInput(this)"></textarea>
+      <button id="help-send" onclick="sendHelpMessage()">➤</button>
+    </div>
+    <div class="help-status" id="help-status">ASK ME TO ALLOCATE, EXPLAIN CONCEPTS, OR DIAGNOSE ISSUES</div>
+  </div>
+</div>
+
+<!-- ── SIZE SLIDER WIDGET ── -->
+<div id="size-widget">
+  <span id="size-icon-top">⊕</span>
+  <div id="size-slider-track">
+    <div id="size-fill" style="height:50%"></div>
+    <input type="range" id="size-slider" min="50" max="130" value="100" step="1"
+      oninput="handleSizeSlider(this.value)">
+    <div id="size-notches">
+      <div class="size-notch"></div>
+      <div class="size-notch"></div>
+      <div class="size-notch"></div>
+      <div class="size-notch"></div>
+      <div class="size-notch"></div>
+    </div>
+  </div>
+  <span id="size-icon-bot">⊖</span>
+  <div id="size-pct">100%</div>
+  <span id="size-widget-label">SIZE</span>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  CONSTANTS & STATE
+// ════════════════════════════════════════════════════════
+const PAGE_SIZE   = 4;
+let totalFrames   = 16;
+const TOTAL_PAGES = 8;
+const PROC_COLORS = ['#00d4ff','#ff6b35','#39ff14','#bf5fff','#ffcc00','#ff2d9b'];
+const PROC_NAMES  = ['PROC_A','PROC_B','PROC_C','PROC_D','PROC_E','PROC_F'];
+
+let frames     = Array.from({length: totalFrames}, () => ({process: null, page: null}));
+let pageTables = {0:{}, 1:{}, 2:{}};
+let stats      = {allocs:0, frees:0, faults:0};
+let selectedFrame = null;
+let clockTick     = 0;
+
+const SEGMENTS_DEFAULT = [
+  {name:'CODE',   size:12, base:0x1000},
+  {name:'DATA',   size:8,  base:0x4000},
+  {name:'HEAP',   size:20, base:0x6000},
+  {name:'STACK',  size:16, base:0xa000},
+  {name:'SHARED', size:6,  base:0xc000},
+];
+let segments   = JSON.parse(JSON.stringify(SEGMENTS_DEFAULT));
+let virtualAddr = 8;
+
+// ════════════════════════════════════════════════════════
+//  AUDIO ENGINE
+// ════════════════════════════════════════════════════════
+let audioCtx   = null;
+let masterGain = null;
+let isMuted    = false;
+let audioEnabled = false;
+
+function getCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function getMaster() {
+  const c = getCtx();
+  if (!masterGain) { masterGain = c.createGain(); masterGain.gain.value = 0.55; masterGain.connect(c.destination); }
+  return masterGain;
+}
+function playOsc(type, freq, startT, endT, peak, fi=0.005, fo=0.05) {
+  const c=getCtx(), m=getMaster(), o=c.createOscillator(), g=c.createGain();
+  o.type=type; o.frequency.setValueAtTime(freq,startT);
+  g.gain.setValueAtTime(0,startT); g.gain.linearRampToValueAtTime(peak,startT+fi);
+  g.gain.setValueAtTime(peak,endT-fo); g.gain.linearRampToValueAtTime(0,endT);
+  o.connect(g); g.connect(m); o.start(startT); o.stop(endT+0.01);
+}
+function playNoise(dur, peak, filterFreq=2000, delay=0) {
+  const c=getCtx(), m=getMaster();
+  const buf=c.createBuffer(1,c.sampleRate*dur,c.sampleRate);
+  const d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  const src=c.createBufferSource(); src.buffer=buf;
+  const flt=c.createBiquadFilter(); flt.type='bandpass'; flt.frequency.value=filterFreq; flt.Q.value=2;
+  const g=c.createGain(); const t=c.currentTime+delay;
+  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(peak,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(flt); flt.connect(g); g.connect(m); src.start(t); src.stop(t+dur+0.05);
+}
+const SOUNDS = {
+  allocate()   { const c=getCtx(),t=c.currentTime; playOsc('sine',440,t,t+.18,.4); playOsc('sine',660,t+.06,t+.22,.3); playOsc('sine',880,t+.12,t+.28,.25); },
+  deallocate() { const c=getCtx(),m=getMaster(),t=c.currentTime; const o=c.createOscillator(),g=c.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(600,t); o.frequency.exponentialRampToValueAtTime(120,t+.25); g.gain.setValueAtTime(.35,t); g.gain.linearRampToValueAtTime(0,t+.28); o.connect(g); g.connect(m); o.start(t); o.stop(t+.3); playNoise(.15,.12,400); },
+  flush()      { const c=getCtx(),m=getMaster(),t=c.currentTime; const o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(80,t); o.frequency.exponentialRampToValueAtTime(20,t+.6); g.gain.setValueAtTime(.9,t); g.gain.exponentialRampToValueAtTime(.001,t+.65); o.connect(g); g.connect(m); o.start(t); o.stop(t+.7); playNoise(.5,.55,800); },
+  stressTest() { const c=getCtx(),t=c.currentTime; [261,329,392,523,659,784,1046,1318].forEach((f,i)=>playOsc('sine',f,t+i*.055,t+i*.055+.12,.28)); },
+  tabSwitch()  { const c=getCtx(),m=getMaster(),t=c.currentTime; const o=c.createOscillator(),g=c.createGain(),flt=c.createBiquadFilter(); o.type='sawtooth'; o.frequency.setValueAtTime(200,t); o.frequency.exponentialRampToValueAtTime(800,t+.12); flt.type='lowpass'; flt.frequency.value=1200; g.gain.setValueAtTime(.25,t); g.gain.linearRampToValueAtTime(0,t+.2); o.connect(flt); flt.connect(g); g.connect(m); o.start(t); o.stop(t+.22); },
+  frameSelect(){ const c=getCtx(),t=c.currentTime; playOsc('sine',800,t,t+.06,.3); playOsc('sine',1600,t+.04,t+.1,.15); },
+  frameFree()  { const c=getCtx(),m=getMaster(),t=c.currentTime; const o=c.createOscillator(),g=c.createGain(); o.type='triangle'; o.frequency.setValueAtTime(300,t); o.frequency.exponentialRampToValueAtTime(80,t+.15); g.gain.setValueAtTime(.4,t); g.gain.exponentialRampToValueAtTime(.001,t+.18); o.connect(g); g.connect(m); o.start(t); o.stop(t+.2); },
+  pageFault()  { const c=getCtx(),t=c.currentTime; [0,.12,.24].forEach(d=>{ playOsc('square',180,t+d,t+d+.09,.35); playOsc('square',360,t+d,t+d+.09,.2); }); },
+  pageCell()   { const c=getCtx(),t=c.currentTime; playOsc('sine',1046,t,t+.08,.2); playOsc('sine',1318,t+.04,t+.12,.12); },
+  segmentDrag(){ const c=getCtx(),t=c.currentTime; playOsc('triangle',300+Math.random()*400,t,t+.04,.12); },
+  addrSweep(v) { const c=getCtx(),t=c.currentTime; playOsc('sine',200+v*30,t,t+.06,.15); },
+  hierarchyClick(){ const c=getCtx(),t=c.currentTime; playOsc('triangle',600,t,t+.05,.2); playOsc('sine',1200,t+.03,t+.09,.1); },
+  policyClick(){ const c=getCtx(),t=c.currentTime; const f=400+Math.random()*300; playOsc('square',f,t,t+.04,.12); },
+  addrSpaceClick(){ const c=getCtx(),t=c.currentTime; playOsc('sine',880,t,t+.06,.18); },
+  muteOff()    { const c=getCtx(),t=c.currentTime; [523,659,784].forEach((f,i)=>playOsc('sine',f,t+i*.06,t+i*.06+.1,.2)); },
+  reset()      { const c=getCtx(),t=c.currentTime; [784,659,523,392].forEach((f,i)=>playOsc('sine',f,t+i*.07,t+i*.07+.12,.25)); },
+};
+function playSound(name, ...args) { if(isMuted) return; try { SOUNDS[name]?.(...args); } catch(e){} }
+function enableAudio() {
+  if (audioEnabled) return; audioEnabled = true;
+  const h = document.getElementById('audio-hint'); if(h) h.style.display='none';
+}
+function toggleMute() {
+  enableAudio(); isMuted = !isMuted;
+  if (masterGain) masterGain.gain.value = isMuted ? 0 : 0.55;
+  const btn = document.getElementById('btn-sound');
+  btn.textContent = isMuted ? '🔇 MUTED' : '🔊 SOUND ON';
+  btn.classList.toggle('muted', isMuted);
+  if (!isMuted) playSound('muteOff');
+}
+function playAndDo(soundName, fn) { enableAudio(); playSound(soundName); fn(); }
+
+// ════════════════════════════════════════════════════════
+//  PARTICLES
+// ════════════════════════════════════════════════════════
+(function() {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+  resize(); window.addEventListener('resize', resize);
+  const pts = Array.from({length:60}, () => ({
+    x:Math.random()*window.innerWidth, y:Math.random()*window.innerHeight,
+    vx:(Math.random()-.5)*.4, vy:(Math.random()-.5)*.4,
+    r:Math.random()*1.5+.5, alpha:Math.random()*.5+.2,
+    color:PROC_COLORS[Math.floor(Math.random()*6)]
+  }));
+  function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    pts.forEach(p => {
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle = p.color + Math.floor(p.alpha*255).toString(16).padStart(2,'0');
+      ctx.fill(); p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0)p.x=canvas.width; if(p.x>canvas.width)p.x=0;
+      if(p.y<0)p.y=canvas.height; if(p.y>canvas.height)p.y=0;
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ════════════════════════════════════════════════════════
+//  CLOCK & LOG
+// ════════════════════════════════════════════════════════
+function getTime() {
+  clockTick++;
+  return String(Math.floor(clockTick/3600)).padStart(2,'0') + ':' +
+         String(Math.floor(clockTick/60)%60).padStart(2,'0') + ':' +
+         String(clockTick%60).padStart(2,'0');
+}
+let logEntries = [
+  {time:'00:00:00', msg:'System initialized. Physical memory: 64KB', type:'info'},
+  {time:'00:00:00', msg:'Paging unit activated. Page size: 4KB', type:'info'},
+];
+function addLog(msg, type='info') {
+  logEntries.push({time:getTime(), msg, type});
+  if (logEntries.length > 32) logEntries.shift();
+  renderLog();
+}
+function renderLog() {
+  const box = document.getElementById('log-box');
+  box.innerHTML = logEntries.map(e =>
+    '<div class="log-entry '+e.type+'"><span class="log-time">['+e.time+'] </span>'+e.msg+'</div>'
+  ).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+// ════════════════════════════════════════════════════════
+//  MEMORY OPERATIONS
+// ════════════════════════════════════════════════════════
+function usedCount() { return frames.filter(f => f.process !== null).length; }
+
+function allocate(pid, pageNum) {
+  pid = parseInt(pid); pageNum = parseInt(pageNum);
+  const fi = frames.findIndex(f => f.process === null);
+  if (fi === -1) { playSound('pageFault'); addLog('PAGE FAULT: No free frames! '+PROC_NAMES[pid], 'fault'); stats.faults++; updateStats(); return; }
+  frames[fi] = {process: pid, page: pageNum};
+  pageTables[pid][pageNum] = fi;
+  playSound('allocate');
+  addLog('ALLOC: '+PROC_NAMES[pid]+' page '+pageNum+' → frame '+fi, 'alloc');
+  stats.allocs++; updateStats(); renderFrames(); renderProcTables(); renderAddrTranslation(); flashFrame(fi);
+}
+function deallocate(fi) {
+  if (frames[fi].process === null) return;
+  const {process:pid, page:pageNum} = frames[fi];
+  frames[fi] = {process:null, page:null};
+  delete pageTables[pid][pageNum];
+  playSound('deallocate');
+  addLog('FREE: Frame '+fi+' released ('+PROC_NAMES[pid]+' p'+pageNum+')', 'free');
+  stats.frees++; updateStats(); renderFrames(); renderProcTables(); renderAddrTranslation(); flashFrame(fi);
+}
+function randomAllocate() { allocate(Math.floor(Math.random()*3), Math.floor(Math.random()*TOTAL_PAGES)); }
+function randomDeallocate() {
+  const used = frames.map((f,i) => f.process!==null?i:-1).filter(i=>i!==-1);
+  if (used.length) deallocate(used[Math.floor(Math.random()*used.length)]);
+}
+function flushAll() {
+  frames = Array.from({length:totalFrames}, ()=>({process:null,page:null}));
+  pageTables = {0:{},1:{},2:{}};
+  addLog('SYSTEM: All memory flushed.', 'free');
+  stats.frees += totalFrames; updateStats(); renderFrames(); renderProcTables(); renderAddrTranslation();
+}
+function stressTest() { Array.from({length:8}).forEach((_,i)=>setTimeout(randomAllocate, i*130)); }
+function resetAll() {
+  enableAudio(); playSound('reset');
+  frames = Array.from({length:totalFrames}, ()=>({process:null,page:null}));
+  pageTables = {0:{},1:{},2:{}};
+  stats = {allocs:0, frees:0, faults:0};
+  selectedFrame = null; segments = JSON.parse(JSON.stringify(SEGMENTS_DEFAULT));
+  virtualAddr = 8; clockTick = 0;
+  logEntries = [{time:'00:00:00', msg:'System reset. Memory cleared.', type:'info'}];
+  const vs = document.getElementById('vaddr-slider'); if(vs) vs.value=8;
+  const vd = document.getElementById('vaddr-display'); if(vd) vd.textContent='0x0008';
+  updateStats(); renderFrames(); renderProcTables(); renderAddrTranslation();
+  renderLog(); renderSegmentBars(); renderSegmentSliders(); renderSegmentMap(); renderSegmentStats();
+  addLog('All processes terminated. Reset complete.', 'info');
+}
+
+// ════════════════════════════════════════════════════════
+//  STATS
+// ════════════════════════════════════════════════════════
+function updateStats() {
+  const used = usedCount();
+  const util = Math.round((used/totalFrames)*100);
+  document.getElementById('stat-allocs').textContent = stats.allocs;
+  document.getElementById('stat-frees').textContent  = stats.frees;
+  document.getElementById('stat-faults').textContent = stats.faults;
+  document.getElementById('stat-util').textContent   = util+'%';
+  document.getElementById('util-bar').style.width    = util+'%';
+  document.getElementById('util-text').textContent   = used+'/'+totalFrames;
+  renderLegend();
+}
+
+// ════════════════════════════════════════════════════════
+//  RESIZE PHYSICAL MEMORY
+// ════════════════════════════════════════════════════════
+function resizeMemory(newCount) {
+  enableAudio();
+  const old = totalFrames;
+  if (newCount < old) {
+    for (let fi=newCount; fi<old; fi++) {
+      if (frames[fi] && frames[fi].process !== null) {
+        const {process:pid, page:pg} = frames[fi]; delete pageTables[pid][pg];
+      }
+    }
+    frames = frames.slice(0, newCount);
+    playSound('deallocate');
+  } else {
+    for (let fi=old; fi<newCount; fi++) frames.push({process:null, page:null});
+    playSound('allocate');
+  }
+  totalFrames = newCount;
+  const kb = totalFrames * PAGE_SIZE;
+  const ml = document.getElementById('mem-label'); if(ml) ml.textContent='PHYSICAL MEMORY — '+kb+'KB';
+  const fd = document.getElementById('mem-frames-display'); if(fd) fd.textContent=newCount;
+  const kd = document.getElementById('mem-kb-display'); if(kd) kd.textContent=kb+'KB';
+  const sl = document.getElementById('mem-config-slider'); if(sl) { sl.value=newCount; updateSliderGradient(sl, newCount); }
+  document.querySelectorAll('.mem-preset-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.frames)===newCount));
+  if (newCount < old) { const p=document.getElementById('mem-config-panel'); if(p){p.classList.remove('warn');void p.offsetWidth;p.classList.add('warn');} }
+  addLog('MEMORY RESIZE: '+(old*PAGE_SIZE)+'KB → '+kb+'KB ('+newCount+' frames)', 'info');
+  updateStats(); renderFrames(); renderProcTables(); renderAddrTranslation(); renderHierarchy();
+}
+function updateSliderGradient(slider, val) {
+  const pct = ((val-4)/(64-4))*100;
+  slider.style.background = 'linear-gradient(90deg,var(--accent) '+pct+'%,rgba(0,212,255,0.15) '+pct+'%)';
+}
+function handleMemSlider(val) {
+  const v = parseInt(val);
+  const sl = document.getElementById('mem-config-slider');
+  if(sl) updateSliderGradient(sl, v);
+  resizeMemory(v);
+}
+
+// ════════════════════════════════════════════════════════
+//  RENDER: FRAMES GRID
+// ════════════════════════════════════════════════════════
+function renderFrames() {
+  const grid = document.getElementById('frames-grid');
+  grid.innerHTML = '';
+  const cols = totalFrames<=8?4:totalFrames<=32?8:16;
+  grid.style.gridTemplateColumns = 'repeat('+cols+',1fr)';
+  frames.forEach((frame, fi) => {
+    const div = document.createElement('div');
+    div.className = 'frame-block'; div.id = 'frame-'+fi;
+    const color = frame.process!==null ? PROC_COLORS[frame.process%6] : '#2a3a5c';
+    div.style.border = '2px solid '+(selectedFrame===fi?'#ffcc00':color);
+    if (frame.process!==null) { div.style.background='linear-gradient(135deg,'+color+'22,'+color+'11)'; div.style.boxShadow='0 0 8px '+color+'40'; }
+    if (selectedFrame===fi) div.style.boxShadow='0 0 12px rgba(255,204,0,.6)';
+    div.innerHTML = '<span class="frame-num">F'+String(fi).padStart(2,'0')+'</span>' +
+      (frame.process!==null
+        ? '<span class="frame-proc" style="color:'+color+';text-shadow:0 0 6px '+color+'">'+PROC_NAMES[frame.process%6]+'</span><span class="frame-page" style="color:'+color+'">P'+frame.page+'</span>'
+        : '<span class="frame-free">FREE</span>');
+    div.addEventListener('click', () => {
+      enableAudio();
+      if (frame.process!==null) { playSound('frameFree'); deallocate(fi); }
+      else { playSound('frameSelect'); selectedFrame=fi; renderFrames(); }
+    });
+    grid.appendChild(div);
+  });
+}
+function flashFrame(fi) {
+  const el = document.getElementById('frame-'+fi);
+  if (!el) return;
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  const color = frames[fi]&&frames[fi].process!==null ? PROC_COLORS[frames[fi].process%6] : '#2a3a5c';
+  el.style.boxShadow = '0 0 24px '+color+', 0 0 48px '+color+'80';
+  setTimeout(() => { el.classList.remove('flash'); renderFrames(); }, 520);
+}
+
+// ════════════════════════════════════════════════════════
+//  RENDER: PROCESS PAGE TABLES
+// ════════════════════════════════════════════════════════
+function renderProcTables() {
+  const container = document.getElementById('proc-tables');
+  container.innerHTML = '';
+  [0,1,2].forEach(pid => {
+    const color = PROC_COLORS[pid];
+    const card = document.createElement('div');
+    card.className = 'proc-table-card'; card.style.border='1px solid '+color+'40';
+    const title = document.createElement('div');
+    title.className='proc-table-title'; title.style.cssText='color:'+color+';text-shadow:0 0 6px '+color;
+    title.textContent=PROC_NAMES[pid]; card.appendChild(title);
+    const row = document.createElement('div'); row.className='page-cells-row';
+    for (let p=0; p<TOTAL_PAGES; p++) {
+      const cell = document.createElement('div'); cell.className='page-cell';
+      const fIdx = pageTables[pid][p]; const isAlloc = fIdx!==undefined;
+      cell.style.border='1px solid '+(isAlloc?color:'var(--border)');
+      cell.style.background = isAlloc?color+'22':'transparent';
+      cell.style.color = isAlloc?color:'var(--dim)';
+      if(isAlloc) cell.style.boxShadow='0 0 6px '+color+'60';
+      cell.textContent='P'+p;
+      cell.addEventListener('click',()=>{ enableAudio(); playSound('pageCell'); isAlloc?deallocate(fIdx):allocate(pid,p); });
+      row.appendChild(cell);
+    }
+    card.appendChild(row);
+    const loaded=document.createElement('div'); loaded.className='proc-pages-loaded';
+    loaded.textContent=Object.keys(pageTables[pid]).length+' pages loaded';
+    card.appendChild(loaded); container.appendChild(card);
+  });
+}
+
+// ════════════════════════════════════════════════════════
+//  RENDER: LEGEND
+// ════════════════════════════════════════════════════════
+function renderLegend() {
+  document.getElementById('legend-items').innerHTML = PROC_NAMES.map((name,i) => {
+    const cnt = frames.filter(f=>f.process===i).length, c=PROC_COLORS[i];
+    return '<div class="legend-item"><div class="legend-dot" style="background:'+c+';box-shadow:0 0 6px '+c+'"></div><span style="color:'+c+';font-size:10px">'+name+'</span><span class="legend-frames">'+cnt+' frames</span></div>';
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════
+//  ADDRESS TRANSLATION
+// ════════════════════════════════════════════════════════
+function handleAddrChange(val) {
+  enableAudio(); virtualAddr=parseInt(val);
+  document.getElementById('vaddr-display').textContent='0x'+virtualAddr.toString(16).toUpperCase().padStart(4,'0');
+  playSound('addrSweep',virtualAddr); renderAddrTranslation();
+}
+function renderAddrTranslation() {
+  const pageNum=Math.floor(virtualAddr/PAGE_SIZE), offset=virtualAddr%PAGE_SIZE;
+  const frameNum=pageTables[0]?.[pageNum], hasFrame=frameNum!==undefined;
+  const physAddr=hasFrame?frameNum*PAGE_SIZE+offset:null;
+  const items=[
+    {label:'VIRTUAL ADDR',val:'0x'+virtualAddr.toString(16).toUpperCase().padStart(4,'0'),color:'#00d4ff',big:true},null,
+    {label:'PAGE #',val:pageNum,color:'#bf5fff'},{label:'OFFSET',val:offset,color:'#ff6b35'},null,
+    {label:'FRAME #',val:hasFrame?frameNum:'FAULT',color:hasFrame?'#39ff14':'#ff4444'},null,
+    {label:'PHYS ADDR',val:physAddr!==null?'0x'+physAddr.toString(16).toUpperCase().padStart(4,'0'):'PAGE FAULT',color:physAddr!==null?'#ffcc00':'#ff4444',big:true},
+  ];
+  document.getElementById('addr-flow').innerHTML = items.map(item =>
+    !item ? '<span class="addr-arrow">→</span>' :
+    '<div class="addr-box" style="background:'+item.color+'22;border:1px solid '+item.color+'60"><div class="addr-box-label">'+item.label+'</div><div class="addr-box-val'+(item.big?' big':'')+'" style="color:'+item.color+';text-shadow:0 0 8px '+item.color+'60">'+item.val+'</div></div>'
+  ).join('');
+}
+
+// ════════════════════════════════════════════════════════
+//  SEGMENTATION
+// ════════════════════════════════════════════════════════
+function renderSegmentBars() {
+  document.getElementById('seg-bars').innerHTML = segments.map((seg,i) => {
+    const c=PROC_COLORS[i%6], pct=(seg.size/64)*100;
+    return '<div class="seg-bar-row"><span class="seg-bar-label" style="color:var(--dim)">'+seg.name+'</span><div class="seg-bar-outer" style="border:1px solid '+c+'40"><div class="seg-bar-inner" style="width:'+pct+'%;background:linear-gradient(90deg,'+c+'cc,'+c+'66);box-shadow:0 0 10px '+c+'80"><span>'+seg.size+'KB</span></div></div><span class="seg-bar-addr" style="color:'+c+'">'+seg.base.toString(16).toUpperCase().padStart(4,'0')+'h</span></div>';
+  }).join('');
+}
+function renderSegmentSliders() {
+  document.getElementById('seg-sliders').innerHTML = segments.map((seg,i) => {
+    const c=PROC_COLORS[i%6];
+    return '<div class="seg-ctrl-row"><span class="seg-ctrl-label" style="color:'+c+'">'+seg.name+'</span><input type="range" min="2" max="32" value="'+seg.size+'" style="accent-color:'+c+'" oninput="handleSegSlider('+i+',this.value)"><span class="seg-ctrl-val" style="color:'+c+'" id="seg-val-'+i+'">'+seg.size+'KB</span></div>';
+  }).join('');
+}
+function handleSegSlider(i, val) {
+  enableAudio(); segments[i].size=parseInt(val);
+  document.getElementById('seg-val-'+i).textContent=val+'KB';
+  playSound('segmentDrag'); renderSegmentBars(); renderSegmentMap(); renderSegmentStats();
+}
+function renderSegmentMap() {
+  const map=document.getElementById('seg-map');
+  map.querySelectorAll('.seg-block').forEach(el=>el.remove());
+  segments.forEach((seg,i)=>{
+    const c=PROC_COLORS[i%6], topPct=((seg.base-0x1000)/(64*256))*100, hPct=(seg.size/64)*100;
+    const block=document.createElement('div'); block.className='seg-block';
+    block.style.cssText='top:'+Math.min(topPct,90)+'%;height:'+Math.max(hPct,4)+'%;background:linear-gradient(135deg,'+c+'33,'+c+'11);border:1px solid '+c+'80;box-shadow:0 0 15px '+c+'30;';
+    block.innerHTML='<span class="seg-block-name" style="color:'+c+';text-shadow:0 0 6px '+c+'">'+seg.name+'</span><span class="seg-block-size" style="color:'+c+'99">'+seg.size+'KB</span>';
+    map.appendChild(block);
+  });
+}
+function renderSegmentStats() {
+  const tot=segments.reduce((a,s)=>a+s.size,0);
+  document.getElementById('seg-stats').innerHTML=[
+    {label:'TOTAL SEGMENTS',value:segments.length,color:'#00d4ff'},
+    {label:'USED MEMORY',value:tot+'KB',color:'#39ff14'},
+    {label:'FREE MEMORY',value:(64-tot)+'KB',color:'#ff6b35'},
+    {label:'FRAGMENTATION',value:Math.round((1-tot/64)*100)+'%',color:'#ffcc00'},
+  ].map(s=>'<div class="seg-stat" style="border:1px solid '+s.color+'30"><div class="seg-stat-label">'+s.label+'</div><div class="seg-stat-val" style="color:'+s.color+';text-shadow:0 0 8px '+s.color+'60">'+s.value+'</div></div>').join('');
+}
+
+// ════════════════════════════════════════════════════════
+//  VIRTUAL MEMORY
+// ════════════════════════════════════════════════════════
+function renderHierarchy() {
+  const util=Math.round((usedCount()/totalFrames)*100), ramKB=totalFrames*PAGE_SIZE;
+  const levels=[
+    {name:'TLB',sub:'Translation Lookaside Buffer',color:'#00d4ff',lat:'1ns',size:'64 entries',fill:75},
+    {name:'L1/L2 CACHE',sub:'CPU Cache Layer',color:'#39ff14',lat:'4ns',size:'512KB',fill:55},
+    {name:'PHYSICAL RAM',sub:'Main Memory',color:'#bf5fff',lat:'100ns',size:ramKB+'KB',fill:util},
+    {name:'SWAP / DISK',sub:'Virtual Extension',color:'#ff6b35',lat:'10ms',size:(ramKB*4)+'KB',fill:20},
+  ];
+  document.getElementById('hierarchy-list').innerHTML=levels.map((lv,i)=>
+    '<div class="hierarchy-item" style="border:1px solid '+lv.color+'40;background:'+lv.color+'08" onclick="enableAudio();playSound(\'hierarchyClick\')">'+
+    '<div class="hierarchy-fill" style="width:'+lv.fill+'%;background:linear-gradient(90deg,'+lv.color+'15,'+lv.color+'08)"></div>'+
+    '<div class="hierarchy-inner">'+
+    '<div class="hierarchy-icon" style="border:2px solid '+lv.color+';box-shadow:0 0 12px '+lv.color+'60;background:'+lv.color+'15;color:'+lv.color+'">L'+i+'</div>'+
+    '<div style="flex:1"><div class="hierarchy-name" style="color:'+lv.color+'">'+lv.name+'</div><div class="hierarchy-sub">'+lv.sub+'</div></div>'+
+    '<div class="hierarchy-right"><div class="hierarchy-latency" style="color:'+lv.color+'">'+lv.lat+'</div><div class="hierarchy-size">'+lv.size+'</div><div class="hierarchy-used" style="color:'+lv.color+'">'+lv.fill+'% used</div></div>'+
+    '</div><div class="hierarchy-bar"><div class="hierarchy-bar-inner" style="width:'+lv.fill+'%;background:'+lv.color+';box-shadow:0 0 6px '+lv.color+'"></div></div></div>'
+  ).join('');
+}
+function renderResolutionSteps() {
+  const steps=[
+    {step:'01',label:'CPU requests virtual address',status:'done',color:'#00d4ff'},
+    {step:'02',label:'TLB lookup',status:'done',color:'#39ff14'},
+    {step:'03',label:'Page table walk',status:'active',color:'#bf5fff'},
+    {step:'04',label:'Physical memory access',status:'pending',color:'#ff6b35'},
+    {step:'05',label:'Return data to CPU',status:'pending',color:'#ffcc00'},
+  ];
+  document.getElementById('resolution-steps').innerHTML=steps.map(s=>
+    '<div class="resolution-step '+(s.status==='pending'?'pending':'')+'">'+
+    '<div class="step-dot '+(s.status==='active'?'active':'')+'" style="background:'+(s.status==='done'?s.color:s.status==='active'?s.color+'33':'#0a1428')+';border:1px solid '+s.color+';color:'+(s.status==='done'?'#000':s.color)+';box-shadow:'+(s.status==='active'?'0 0 10px '+s.color:'none')+'">'+
+    (s.status==='done'?'✓':s.step)+'</div>'+
+    '<div class="step-line" style="background:'+(s.status==='done'?s.color+'60':'var(--border)')+'"></div>'+
+    '<span class="step-label" style="color:'+s.color+'">'+s.label+'</span></div>'
+  ).join('');
+}
+function renderPolicies() {
+  const policies=[{name:'FIFO',desc:'First In, First Out',eff:62},{name:'LRU',desc:'Least Recently Used',eff:85},{name:'OPTIMAL',desc:"Belady's Algorithm",eff:97},{name:'CLOCK',desc:'Second Chance',eff:78}];
+  document.getElementById('policy-list').innerHTML=policies.map((p,i)=>{
+    const c=PROC_COLORS[i];
+    return '<div class="policy-item" onclick="enableAudio();playSound(\'policyClick\')"><div class="policy-row"><span class="policy-name" style="color:'+c+'">'+p.name+'</span><span class="policy-desc">'+p.desc+'</span><span class="policy-pct" style="color:'+c+'">'+p.eff+'%</span></div><div class="policy-bar-outer"><div class="policy-bar-inner" style="width:'+p.eff+'%;background:linear-gradient(90deg,'+c+','+c+'88);box-shadow:0 0 8px '+c+'80"></div></div></div>';
+  }).join('');
+}
+function renderAddrSpace() {
+  const regions=[{label:'KERNEL',size:25,color:'#ff4444'},{label:'STACK',size:15,color:'#ffcc00'},{label:'HEAP',size:25,color:'#39ff14'},{label:'CODE',size:20,color:'#00d4ff'},{label:'FREE',size:15,color:'#4a6080'}];
+  document.getElementById('addr-space-row').innerHTML=regions.map(r=>
+    '<div class="addr-space-block" style="flex:'+r.size+';background:'+r.color+'22;border:1px solid '+r.color+'60" onclick="enableAudio();playSound(\'addrSpaceClick\')"><span class="addr-space-name" style="color:'+r.color+'">'+r.label+'</span><span class="addr-space-pct" style="color:'+r.color+'">'+r.size+'%</span></div>'
+  ).join('');
+}
+
+// ════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    enableAudio(); playSound('tabSwitch');
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ════════════════════════════════════════════════════════
+//  SIZE SLIDER
+// ════════════════════════════════════════════════════════
+function handleSizeSlider(val) {
+  const scale=val/100, app=document.getElementById('app');
+  app.style.transform='scale('+scale+')';
+  document.body.style.minHeight=(app.scrollHeight*scale)+'px';
+  const pct=(val-50)/(130-50)*100;
+  document.getElementById('size-fill').style.height=pct+'%';
+  document.getElementById('size-pct').textContent=val+'%';
+  const w=document.getElementById('size-widget'), p=document.getElementById('size-pct');
+  if(scale>1){w.style.borderColor='rgba(57,255,20,0.5)';p.style.color='#39ff14';p.style.textShadow='0 0 6px #39ff14';}
+  else if(scale<0.8){w.style.borderColor='rgba(255,107,53,0.5)';p.style.color='#ff6b35';p.style.textShadow='0 0 6px #ff6b35';}
+  else{w.style.borderColor='rgba(0,212,255,0.35)';p.style.color='#00d4ff';p.style.textShadow='0 0 6px #00d4ff';}
+}
+
+// ════════════════════════════════════════════════════════
+//  AI HELP CHATBOT
+// ════════════════════════════════════════════════════════
+let helpOpen    = false;
+let chatHistory = [];
+let isAiTyping  = false;
+
+function toggleHelp() {
+  helpOpen = !helpOpen;
+  document.getElementById('help-panel').classList.toggle('open', helpOpen);
+  if (helpOpen && chatHistory.length === 0) {
+    appendAiMessage(
+      '👋 Hello! I\'m **MEM·AI** — your memory management assistant, powered by Claude.\n\n' +
+      'I can:\n• **Explain** paging, segmentation, TLB, page faults, virtual memory\n' +
+      '• **Control** the simulator — just ask me to allocate, flush, stress test, etc.\n' +
+      '• **Diagnose** your current memory state and suggest improvements\n\n' +
+      'Try a quick chip above or ask me anything! 🚀'
+    );
+  }
+}
+
+function getAppState() {
+  const used = usedCount(), kb = totalFrames*PAGE_SIZE;
+  const procs = [0,1,2].map(pid => PROC_NAMES[pid]+':'+Object.keys(pageTables[pid]||{}).length+'pg').join(' ');
+  return 'LIVE STATE: '+kb+'KB RAM ('+totalFrames+' frames), '+used+' used ('+Math.round(used/totalFrames*100)+'%), '+
+    (totalFrames-used)+' free. Processes=['+procs+']. '+
+    'Stats: '+stats.allocs+' allocs/'+stats.frees+' frees/'+stats.faults+' faults. '+
+    'ActiveTab='+((document.querySelector('.tab-btn.active')||{textContent:'PAGING'}).textContent.trim());
+}
+
+const AI_SYSTEM = 'You are MEM·AI, an expert assistant embedded inside a Dynamic Memory Management Visualizer web app built with HTML/CSS/JS.\n\n' +
+  'THE APP has 3 tabs:\n' +
+  '1. PAGING: Physical memory grid of 4KB frames. Users allocate/deallocate pages for PROC_A (pid=0), PROC_B (pid=1), PROC_C (pid=2). Shows virtual→physical address translation.\n' +
+  '2. SEGMENTATION: Adjustable segments CODE/DATA/HEAP/STACK/SHARED with visual memory map.\n' +
+  '3. VIRTUAL MEMORY: Memory hierarchy TLB→Cache→RAM→Disk, page replacement policies (FIFO/LRU/Optimal/Clock), virtual address space.\n\n' +
+  'SIMULATOR COMMANDS you can issue (append to response, auto-executed):\n' +
+  '[CMD:allocate:PID:PAGE] (PID=0/1/2, PAGE=0-7)\n' +
+  '[CMD:deallocate]\n[CMD:flush]\n[CMD:stress]\n[CMD:reset]\n' +
+  '[CMD:tab:paging] or [CMD:tab:segmentation] or [CMD:tab:virtual]\n' +
+  '[CMD:resize:N] (N=4 to 64 frames)\n\n' +
+  'Rules: Be concise. Use bullet points. When user asks you to DO something in simulator, issue the right command AND explain what you did. Never make up data.';
+
+async function callClaude(userMsg) {
+  chatHistory.push({role:'user', content:userMsg});
+  const state = getAppState();
+  const messages = chatHistory.map((m,i) =>
+    i===0 ? {role:m.role, content:'['+state+']\n\n'+m.content} : m
+  );
+
+  const MAX_RETRIES = 4;
+  const BASE_DELAY  = 8000; // 8s base, doubles each retry
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514', max_tokens:800, system:AI_SYSTEM, messages})
+      });
+
+      // 429 = rate limited → wait and retry
+      if (res.status === 429) {
+        // Try to read Retry-After header, else use exponential backoff
+        const retryAfter = res.headers.get('Retry-After');
+        const waitMs = retryAfter ? parseInt(retryAfter)*1000 : BASE_DELAY * Math.pow(2, attempt);
+        const waitSec = Math.round(waitMs/1000);
+        updateTypingLabel('⏳ Rate limited — retrying in '+waitSec+'s (attempt '+(attempt+1)+'/'+MAX_RETRIES+')...');
+        await sleep(waitMs);
+        updateTypingLabel('🔄 Retrying...');
+        continue; // retry
+      }
+
+      if (!res.ok) throw new Error('HTTP '+res.status);
+
+      const data = await res.json();
+      const text = data.content?.[0]?.text || 'Sorry, no response.';
+      chatHistory.push({role:'assistant', content:text});
+      return text;
+
+    } catch(e) {
+      // Network error or non-retryable — if last attempt, give up
+      if (attempt === MAX_RETRIES-1) {
+        const err = '⚠ Failed after '+MAX_RETRIES+' attempts: '+e.message+'\n\nThis is usually a temporary rate limit. Please wait 30 seconds and try again.';
+        chatHistory.push({role:'assistant', content:err});
+        return err;
+      }
+      const waitMs = BASE_DELAY * Math.pow(2, attempt);
+      updateTypingLabel('⚠ Error — retrying in '+Math.round(waitMs/1000)+'s...');
+      await sleep(waitMs);
+    }
+  }
+
+  // Should not reach here, but safety fallback
+  const fallback = '⚠ Rate limit exceeded. Please wait a moment and try again.';
+  chatHistory.push({role:'assistant', content:fallback});
+  return fallback;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function updateTypingLabel(text) {
+  const el = document.getElementById('typing-indicator');
+  if (!el) return;
+  const bubble = el.querySelector('.chat-bubble.ai');
+  if (bubble) bubble.innerHTML = '<span style="font-size:10px;color:var(--warn);letter-spacing:1px">'+text+'</span>';
+}
+
+function execCommands(text) {
+  const re=/\[CMD:([^\]]+)\]/g; let m, done=[];
+  while((m=re.exec(text))!==null) {
+    const p=m[1].split(':');
+    try {
+      if(p[0]==='allocate'){allocate(p[1],p[2]);done.push('allocated pg'+p[2]+' for '+PROC_NAMES[parseInt(p[1])]);}
+      else if(p[0]==='deallocate'){randomDeallocate();done.push('deallocated');}
+      else if(p[0]==='flush'){flushAll();done.push('flushed');}
+      else if(p[0]==='stress'){stressTest();done.push('stress test started');}
+      else if(p[0]==='reset'){resetAll();done.push('reset');}
+      else if(p[0]==='tab'){const b=document.querySelector('.tab-btn[data-tab="'+p[1]+'"]');if(b)b.click();done.push('tab→'+p[1]);}
+      else if(p[0]==='resize'){const n=parseInt(p[1]);if(n>=4&&n<=64){resizeMemory(n);done.push('resized→'+n+' frames');}}
+    } catch(e){}
+  }
+  return done;
+}
+
+function mdToHtml(text) {
+  text = text.replace(/\[CMD:[^\]]+\]/g,'');
+  text = text.replace(/\*\*(.+?)\*\*/g,'<strong style="color:var(--accent)">$1</strong>');
+  text = text.replace(/`([^`]+)`/g,'<code>$1</code>');
+  text = text.replace(/^[•\-\*] (.+)$/gm,'<div style="margin:2px 0;padding-left:10px">▸ $1</div>');
+  text = text.replace(/\n/g,'<br>');
+  return text;
+}
+
+function appendAiMessage(text) {
+  const msgs=document.getElementById('help-messages');
+  const d=document.createElement('div'); d.className='chat-msg';
+  d.innerHTML='<div class="chat-avatar ai">🧠</div><div class="chat-bubble ai">'+mdToHtml(text)+'</div>';
+  msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight;
+}
+function appendUserMessage(text) {
+  const msgs=document.getElementById('help-messages');
+  const d=document.createElement('div'); d.className='chat-msg user';
+  d.innerHTML='<div class="chat-avatar user-av">👤</div><div class="chat-bubble user">'+text+'</div>';
+  msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight;
+}
+function showTyping() {
+  const msgs=document.getElementById('help-messages');
+  const d=document.createElement('div'); d.className='chat-msg'; d.id='typing-indicator';
+  d.innerHTML='<div class="chat-avatar ai">🧠</div><div class="chat-bubble ai" style="padding:10px 14px"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+  msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight;
+}
+function removeTyping() { const el=document.getElementById('typing-indicator'); if(el)el.remove(); }
+
+async function sendHelpMessage(text) {
+  if (isAiTyping) return;
+  const input=document.getElementById('help-input');
+  const msg=(text!==undefined?text:input.value).trim();
+  if (!msg) return;
+  input.value=''; input.style.height='auto';
+  appendUserMessage(msg);
+  isAiTyping=true;
+  document.getElementById('help-send').disabled=true;
+  document.getElementById('help-status').textContent='AI IS THINKING...';
+  showTyping();
+  const aiText=await callClaude(msg);
+  removeTyping();
+  const done=execCommands(aiText);
+  appendAiMessage(aiText);
+  if(done.length){
+    const note=document.createElement('div');
+    note.style.cssText='font-size:9px;color:var(--accent3);letter-spacing:1px;padding:2px 8px;text-align:center;margin-top:4px;';
+    note.textContent='✓ EXECUTED: '+done.join(' · ').toUpperCase();
+    document.getElementById('help-messages').appendChild(note);
+  }
+  isAiTyping=false;
+  document.getElementById('help-send').disabled=false;
+  document.getElementById('help-status').textContent='ASK ME TO ALLOCATE, EXPLAIN CONCEPTS, OR DIAGNOSE ISSUES';
+  document.getElementById('help-messages').scrollTop=999999;
+}
+function askChip(text) {
+  if(!helpOpen) toggleHelp();
+  setTimeout(()=>sendHelpMessage(text), helpOpen?0:350);
+}
+function handleHelpKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendHelpMessage();} }
+function autoResizeInput(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,100)+'px'; }
+
+// ════════════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════════════
+document.addEventListener('click', enableAudio, {once:true});
+
+function init() {
+  const sl=document.getElementById('mem-config-slider');
+  if(sl) updateSliderGradient(sl, 16);
+  renderFrames(); renderProcTables(); renderLegend(); renderAddrTranslation();
+  renderLog(); renderSegmentBars(); renderSegmentSliders(); renderSegmentMap(); renderSegmentStats();
+  renderHierarchy(); renderResolutionSteps(); renderPolicies(); renderAddrSpace();
+  updateStats();
+}
+init();
+</script>
+</body>
+</html>
