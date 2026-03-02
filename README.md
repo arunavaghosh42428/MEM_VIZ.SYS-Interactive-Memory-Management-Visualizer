@@ -3,6 +3,11 @@ Since you've successfully set up the GitHub Pages environment, let's make your r
 I have drafted a high-quality `README.md` for you. You can copy this, go to your repository, click **Add file** > **Create new file**, name it `README.md`, and paste the following:
 
 ---
+<img width="1920" height="1116" alt="Screenshot 2026-03-03 at 12 23 08 AM" src="https://github.com/user-attachments/assets/cb8ca9b8-d5fb-4848-ba42-9423d5b31567" />
+<img width="1920" height="1117" alt="Screenshot 2026-03-03 at 12 22 33 AM" src="https://github.com/user-attachments/assets/506d337e-6e5d-415d-96e9-7d013f6619c1" />
+<img width="1920" height="1116" alt="Screenshot 2026-03-03 at 12 25 28 AM" src="https://github.com/user-attachments/assets/c2262a63-bdd7-45bd-95bb-6b1b524f5e53" />
+<img width="1920" height="1115" alt="Screenshot 2026-03-03 at 12 23 54 AM" src="https://github.com/user-attachments/assets/e32bf9ca-a908-4398-9d42-b8682b5da165" />
+<img width="1919" height="1115" alt="Screenshot 2026-03-03 at 12 25 06 AM" src="https://github.com/user-attachments/assets/c04a1491-9934-4ef7-8ff1-8df7185fc8a0" />
 
 # MEM_VIZ.SYS — Interactive Memory Management Visualizer
 
