@@ -15,7 +15,7 @@ I have drafted a high-quality `README.md` for you. You can copy this, go to your
 
 ## 🚀 Live Demo
 
-**[Click here to run the Visualizer](https://www.google.com/search?q=https://arunavaghosh42428.github.io/MEM_VIZ.SYS-Interactive-Memory-Management-Visualizer/)**
+**[Click here to run the Visualizer](https://arunavaghosh42428.github.io/MEM_VIZ.SYS-Interactive-Memory-Management-Visualizer/)**
 
 ## 🛠 Features
 
